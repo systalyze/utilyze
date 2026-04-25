@@ -11,9 +11,8 @@ type InitMsg struct {
 }
 
 type MetricsSnapshotMsg struct {
-	Timestamp          time.Time
-	DeviceSnapshots    []metrics.DeviceSnapshot
-	BandwidthSnapshots []metrics.BandwidthSnapshot
+	Timestamp time.Time
+	GPUs      []metrics.GPUSnapshot
 }
 
 type ErrorMsg struct {

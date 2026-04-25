@@ -17,9 +17,6 @@ import (
 const headerLogo = "⣴⠟⠛⠢⣄⣠⠔⠛⠻⣦\n⠻⣦⣤⠴⠋⠙⠦⣤⣴⠟"
 
 const (
-	computeSeries = "compute"
-	memorySeries  = "memory"
-
 	nvlinkSeries = "nvlink"
 	pcieSeries   = "pcie"
 
@@ -110,11 +107,12 @@ func (m model) View() tea.View {
 		m.solHeaderView(),
 		lipgloss.JoinHorizontal(lipgloss.Top, gridCols...),
 	)
-	var bandwidth string
+	bodyParts := []string{grid}
 	if m.showBandwidth {
-		bandwidth = lipgloss.JoinVertical(lipgloss.Left, m.bandwidthChartHeaderView(), m.bandwidthChart.View())
+		bodyParts = append(bodyParts, lipgloss.JoinVertical(lipgloss.Left, m.bandwidthChartHeaderView(), m.bandwidthChart.View()))
 	}
-	body := lipgloss.JoinVertical(lipgloss.Left, grid, bandwidth, m.hotkeyBarView())
+	bodyParts = append(bodyParts, m.hotkeyBarView())
+	body := lipgloss.JoinVertical(lipgloss.Left, bodyParts...)
 	logo := m.headerLogoView()
 	body = lipgloss.NewCompositor(
 		lipgloss.NewLayer(body),
@@ -165,25 +163,29 @@ func (m model) solHeaderView() string {
 
 func (m model) solHeaderInner() string {
 	name, ceiling, uniform := m.uniformAttribution()
+	mode := m.metricsMode.def()
 
 	gap := m.styles.HeaderLabel.Render(" ")
 	parts := []string{gap}
-	if m.seriesEnabled(computeSeries) {
+
+	if m.metricsMode != MetricsModeSOL {
 		parts = append(parts,
-			m.styles.Compute.Inherit(m.styles.Header).Render(" ■"),
-			m.styles.HeaderLabel.Render(" Compute SOL%"),
+			m.styles.HeaderBold.Render(mode.label),
 		)
 	}
-	if m.seriesEnabled(memorySeries) {
+	for _, series := range mode.series {
+		if !m.seriesEnabled(series.name) {
+			continue
+		}
 		if len(parts) > 1 {
 			parts = append(parts, gap)
 		}
 		parts = append(parts,
-			m.styles.Memory.Inherit(m.styles.Header).Render("■"),
-			m.styles.HeaderLabel.Render(" Memory SOL%"),
+			series.styleFor(m.styles).Inherit(m.styles.Header).Render("■"),
+			m.styles.HeaderLabel.Render(" "+series.legendLabel),
 		)
 	}
-	if uniform && ceiling != nil && m.seriesEnabled(computeSeries) {
+	if m.metricsMode == MetricsModeSOL && uniform && ceiling != nil && m.seriesEnabled(computeSOLSeries) {
 		parts = append(parts,
 			gap,
 			m.styles.ComputeCeiling.Inherit(m.styles.Header).Render("■"),
@@ -227,6 +229,7 @@ func (m model) uniformAttribution() (*string, *float64, bool) {
 }
 
 func (m model) headerMetricsPart(deviceIdx int) string {
+	mode := m.metricsMode.def()
 	dot := m.styles.DotOffline
 	if m.online[deviceIdx] {
 		dot = m.styles.DotOnline
@@ -241,20 +244,21 @@ func (m model) headerMetricsPart(deviceIdx int) string {
 		m.styles.HeaderBold.Render(fmt.Sprintf("GPU %d ", physicalID)),
 		dot,
 	}
-	if m.seriesEnabled(computeSeries) {
-		parts = append(parts,
-			m.styles.Compute.Inherit(m.styles.Header).Render(fmt.Sprintf("%s%4.1f%%", headerSegmentGap, m.computeLastValues[deviceIdx])))
-	}
-	if m.seriesEnabled(memorySeries) {
-		parts = append(parts,
-			m.styles.Memory.Inherit(m.styles.Header).Render(fmt.Sprintf("%s%4.1f%%", headerSegmentGap, m.memoryLastValues[deviceIdx])))
-	}
 
-	if _, _, uniform := m.uniformAttribution(); !uniform {
-		if g, ok := m.gpuCeilings[physicalID]; ok && g.ModelName != nil && g.ComputeSolCeiling != nil {
-			parts = append(parts,
-				m.styles.ComputeCeiling.Inherit(m.styles.Header).Render(
-					fmt.Sprintf(" [%.0f%%]", *g.ComputeSolCeiling)))
+	for _, series := range mode.series {
+		if !m.seriesEnabled(series.name) {
+			continue
+		}
+		parts = append(parts,
+			series.styleFor(m.styles).Inherit(m.styles.Header).Render(headerSegmentGap+series.valueFor(m, deviceIdx).String()))
+	}
+	if m.metricsMode == MetricsModeSOL {
+		if _, _, uniform := m.uniformAttribution(); !uniform {
+			if g, ok := m.gpuCeilings[physicalID]; ok && g.ModelName != nil && g.ComputeSolCeiling != nil {
+				parts = append(parts,
+					m.styles.ComputeCeiling.Inherit(m.styles.Header).Render(
+						fmt.Sprintf(" [%.0f%%]", *g.ComputeSolCeiling)))
+			}
 		}
 	}
 
@@ -317,17 +321,40 @@ func (m model) bandwidthChartHeaderView() string {
 		))
 }
 
-func (m model) hotkeyBarView() string {
-	type hotkeyItem struct {
-		key     string
-		label   string
-		style   lipgloss.Style
-		enabled bool
-	}
+type hotkeyItem struct {
+	key     string
+	label   string
+	series  string
+	style   func(model) lipgloss.Style
+	enabled func(model) bool
+}
 
+func (h hotkeyItem) styleFor(m model, mode metricsModeDef) lipgloss.Style {
+	if h.style != nil {
+		return h.style(m)
+	}
+	for _, series := range mode.series {
+		if series.name == h.series {
+			return series.styleFor(m.styles)
+		}
+	}
+	return m.styles.HeaderBold
+}
+
+func (h hotkeyItem) enabledFor(m model) bool {
+	if h.enabled != nil {
+		return h.enabled(m)
+	}
+	if h.series == "" {
+		return true
+	}
+	return m.seriesEnabled(h.series)
+}
+
+func (m model) hotkeyBarView() string {
 	hotkey := func(item hotkeyItem) string {
-		style := item.style.Inherit(m.styles.HeaderBold)
-		if !item.enabled {
+		style := item.styleFor(m, m.metricsMode.def()).Inherit(m.styles.HeaderBold)
+		if !item.enabledFor(m) {
 			style = lipgloss.NewStyle().Inherit(m.styles.HeaderBold).Foreground(m.styles.Palette.Subtle)
 		}
 		return lipgloss.JoinHorizontal(lipgloss.Top,
@@ -351,26 +378,30 @@ func (m model) hotkeyBarView() string {
 		return showLabel
 	}
 
-	seriesItems := []hotkeyItem{
-		{key: keyCompute, label: "comp", style: m.styles.Compute, enabled: m.seriesEnabled(computeSeries)},
-		{key: keyMemory, label: "mem", style: m.styles.Memory, enabled: m.seriesEnabled(memorySeries)},
-	}
+	seriesItems := m.metricsMode.def().hotkeys
 	if m.showBandwidth {
 		seriesItems = append(seriesItems,
-			hotkeyItem{key: keyPcie, label: "pcie", style: m.styles.PCIe, enabled: m.seriesEnabled(pcieSeries)},
-			hotkeyItem{key: keyNvlink, label: "nvlink", style: m.styles.NVLink, enabled: m.seriesEnabled(nvlinkSeries)},
+			hotkeyItem{
+				key: keyPcie, label: "pcie", series: pcieSeries,
+				style: func(m model) lipgloss.Style { return m.styles.PCIe },
+			},
+			hotkeyItem{
+				key: keyNvlink, label: "nvlink", series: nvlinkSeries,
+				style: func(m model) lipgloss.Style { return m.styles.NVLink },
+			},
 		)
 	}
 
 	sections := []string{
 		section(
-			hotkeyItem{key: keyQuit, label: "quit", style: m.styles.HeaderBold, enabled: true},
-			hotkeyItem{key: keyPause, label: "pause", style: m.styles.HeaderBold, enabled: true},
-			hotkeyItem{key: keyReset, label: "reset", style: m.styles.HeaderBold, enabled: true},
+			hotkeyItem{key: keyQuit, label: "quit"},
+			hotkeyItem{key: keyPause, label: "pause"},
+			hotkeyItem{key: keyReset, label: "reset"},
 		),
 		section(
-			hotkeyItem{key: keyDetail, label: toggleLabel(m.detailMode, "show detail", "hide detail"), style: m.styles.HeaderBold, enabled: true},
-			hotkeyItem{key: keyBandwidth, label: toggleLabel(m.showBandwidth, "show bandwidth", "hide bandwidth"), style: m.styles.HeaderBold, enabled: true},
+			hotkeyItem{key: keyMetricMode, label: "cycle mode"},
+			hotkeyItem{key: keyDetail, label: toggleLabel(m.detailMode, "show detail", "hide detail")},
+			hotkeyItem{key: keyBandwidth, label: toggleLabel(m.showBandwidth, "show bandwidth", "hide bandwidth")},
 		),
 		section(seriesItems...),
 	}
@@ -388,11 +419,12 @@ func (m model) formatTimeSince(chart *tschart.Model, _ float64, index, n int) st
 }
 
 type layout struct {
-	gridPrefixWidth    int
-	gridCols           int
-	gridCellWidth      int
-	gridCellHeight     int
-	gridWidthRemainder int
+	gridPrefixWidth     int
+	gridCols            int
+	gridCellWidth       int
+	gridCellHeight      int
+	gridWidthRemainder  int
+	gridHeightRemainder int
 
 	bandwidthWidth  int
 	bandwidthHeight int
@@ -463,16 +495,20 @@ func (m model) calcLayout(numCharts int, width int, height int) layout {
 	}
 	gridCellHeight := max(gridInnerHeight/rows, 1)
 	gridHeightRemainder := max(gridInnerHeight-gridCellHeight*rows, 0)
-	bwHeight += gridHeightRemainder
+	if m.showBandwidth {
+		bwHeight += gridHeightRemainder
+		gridHeightRemainder = 0
+	}
 
 	bwWidth := max(width-bwAxisWidth, 1)
 
 	return layout{
-		gridPrefixWidth:    solAxisWidth,
-		gridCols:           cols,
-		gridCellWidth:      gridCellWidth,
-		gridCellHeight:     gridCellHeight,
-		gridWidthRemainder: gridWidthRemainder,
+		gridPrefixWidth:     solAxisWidth,
+		gridCols:            cols,
+		gridCellWidth:       gridCellWidth,
+		gridCellHeight:      gridCellHeight,
+		gridWidthRemainder:  gridWidthRemainder,
+		gridHeightRemainder: gridHeightRemainder,
 
 		bandwidthWidth:  bwWidth,
 		bandwidthHeight: bwHeight,
@@ -498,7 +534,11 @@ func (m *model) applyLayout() {
 		if isLastColumn {
 			colWidth += l.gridWidthRemainder
 		}
-		chart.Resize(colWidth, l.gridCellHeight)
+		cellHeight := l.gridCellHeight
+		if isLastChartInColumn {
+			cellHeight += l.gridHeightRemainder
+		}
+		chart.Resize(colWidth, cellHeight)
 	}
 	m.bandwidthChart.Resize(l.bandwidthWidth, l.bandwidthHeight)
 }

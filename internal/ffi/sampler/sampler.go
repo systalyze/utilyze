@@ -38,8 +38,9 @@ type Sampler struct {
 
 type Snapshot struct {
 	DeviceID      int
-	ComputeSOLPct float64
-	MemorySOLPct  float64
+	ComputeSOLPct *float64
+	MemorySOLPct  *float64
+	SMActivePct   *float64
 	Timestamp     time.Time
 }
 
@@ -137,24 +138,30 @@ func (s *Sampler) metricValue(metric string) (float64, bool) {
 }
 
 func (s *Sampler) buildSnapshot(deviceId int) Snapshot {
-	var computeSolPct float64
+	var computeSolPct *float64
 	for _, metric := range smSubPipeMetrics {
-		if v, ok := s.metricValue(metric); ok && v > computeSolPct {
-			computeSolPct = v
+		if v, ok := s.metricValue(metric); ok && (computeSolPct == nil || v > *computeSolPct) {
+			computeSolPct = &v
 		}
 	}
 
-	var memorySolPct float64
+	var memorySolPct *float64
 	for _, metric := range memMetrics {
-		if v, ok := s.metricValue(metric); ok && v > memorySolPct {
-			memorySolPct = v
+		if v, ok := s.metricValue(metric); ok && (memorySolPct == nil || v > *memorySolPct) {
+			memorySolPct = &v
 		}
+	}
+
+	var smActivePct *float64
+	if v, ok := s.metricValue(metricSMCyclesActive); ok {
+		smActivePct = &v
 	}
 
 	return Snapshot{
 		DeviceID:      deviceId,
 		ComputeSOLPct: computeSolPct,
 		MemorySOLPct:  memorySolPct,
+		SMActivePct:   smActivePct,
 		Timestamp:     time.Now(),
 	}
 }

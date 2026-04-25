@@ -8,15 +8,18 @@ import (
 )
 
 const (
-	keyQuit      = "q"
-	keyPause     = "space"
-	keyReset     = "r"
-	keyCompute   = "c"
-	keyMemory    = "m"
-	keyNvlink    = "n"
-	keyPcie      = "p"
-	keyBandwidth = "b"
-	keyDetail    = "d"
+	keyQuit       = "q"
+	keyPause      = "space"
+	keyReset      = "r"
+	keyCompute    = "c"
+	keyMemory     = "m"
+	keyNvlink     = "n"
+	keyGrActive   = "g"
+	keySmActivity = "s"
+	keyPcie       = "p"
+	keyBandwidth  = "b"
+	keyDetail     = "d"
+	keyMetricMode = "tab"
 )
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -36,11 +39,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+c", keyQuit:
 			m.quitting = true
 			return m, tea.Quit
-		case keyCompute:
-			m.toggleSeries(computeSeries)
-			return m, m.beginDraw()
-		case keyMemory:
-			m.toggleSeries(memorySeries)
+		case keyMetricMode:
+			m.metricsMode = m.metricsMode.next()
+			m.applyCeilingThresholds()
+			m.applyLayout()
 			return m, m.beginDraw()
 		case keyNvlink:
 			if !m.showBandwidth {
@@ -74,6 +76,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.applyDetailMode()
 			return m, m.beginDraw()
 		default:
+			key := typedMsg.String()
+			if m.metricsMode.def().handleHotkey(&m, key) {
+				return m, m.beginDraw()
+			}
 			return m, nil
 		}
 	case tea.WindowSizeMsg:
@@ -93,8 +99,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.tick()
 	case MetricsSnapshotMsg:
-		for _, snapshot := range typedMsg.DeviceSnapshots {
-			chartIdx, ok := m.deviceIndexMap[snapshot.DeviceID]
+		var pcieBytesPerSecond float64
+		var nvlinkBytesPerSecond float64
+		hasBandwidth := false
+
+		for _, gpu := range typedMsg.GPUs {
+			chartIdx, ok := m.deviceIndexMap[gpu.DeviceID]
 			if !ok || chartIdx < 0 || chartIdx >= len(m.solCharts) {
 				continue
 			}
@@ -106,22 +116,31 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.paused {
 				continue
 			}
-			chart.Push(computeSeries, typedMsg.Timestamp, snapshot.ComputeSOLPct)
-			chart.Push(memorySeries, typedMsg.Timestamp, snapshot.MemorySOLPct)
-			m.computeLastValues[chartIdx] = snapshot.ComputeSOLPct
-			m.memoryLastValues[chartIdx] = snapshot.MemorySOLPct
+
+			if gpu.SOL.Valid {
+				chart.Push(computeSOLSeries, typedMsg.Timestamp, gpu.SOL.ComputePct)
+				m.computeLastValues[chartIdx] = newPercentValue(gpu.SOL.ComputePct)
+				chart.Push(memorySOLSeries, typedMsg.Timestamp, gpu.SOL.MemoryPct)
+				m.memoryLastValues[chartIdx] = newPercentValue(gpu.SOL.MemoryPct)
+			}
+			if gpu.DCGMUtilization.Valid {
+				chart.Push(smActivitySeries, typedMsg.Timestamp, gpu.DCGMUtilization.SMActivePct)
+				m.smActivityLastValues[chartIdx] = newPercentValue(gpu.DCGMUtilization.SMActivePct)
+			}
+			if gpu.NVMLUtilization.Valid {
+				chart.Push(grActiveSeries, typedMsg.Timestamp, gpu.NVMLUtilization.UtilPct)
+				m.grActiveLastValues[chartIdx] = newPercentValue(gpu.NVMLUtilization.UtilPct)
+			}
+			if gpu.Bandwidth.Valid {
+				pcieBytesPerSecond += gpu.Bandwidth.PCIeTxBps + gpu.Bandwidth.PCIeRxBps
+				nvlinkBytesPerSecond += gpu.Bandwidth.NVLinkTxBps + gpu.Bandwidth.NVLinkRxBps
+				hasBandwidth = true
+			}
 		}
 
-		if !m.paused && len(typedMsg.BandwidthSnapshots) > 0 {
-			timestamp := typedMsg.Timestamp
-			var pcieBytesPerSecond float64
-			var nvlinkBytesPerSecond float64
-			for _, snapshot := range typedMsg.BandwidthSnapshots {
-				pcieBytesPerSecond += snapshot.PCIeTxBytesPerSecond + snapshot.PCIeRxBytesPerSecond
-				nvlinkBytesPerSecond += snapshot.NVLinkTxBytesPerSecond + snapshot.NVLinkRxBytesPerSecond
-			}
-			m.bandwidthChart.Push(pcieSeries, timestamp, pcieBytesPerSecond)
-			m.bandwidthChart.Push(nvlinkSeries, timestamp, nvlinkBytesPerSecond)
+		if !m.paused && hasBandwidth {
+			m.bandwidthChart.Push(pcieSeries, typedMsg.Timestamp, pcieBytesPerSecond)
+			m.bandwidthChart.Push(nvlinkSeries, typedMsg.Timestamp, nvlinkBytesPerSecond)
 			m.pcieLastValue = pcieBytesPerSecond
 			m.nvlinkLastValue = nvlinkBytesPerSecond
 		}

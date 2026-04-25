@@ -49,6 +49,9 @@ func loadSymbols(lib uintptr) {
 	purego.RegisterLibFunc(&nvmlDeviceGetCount_v2, lib, sym_nvmlDeviceGetCount_v2)
 	purego.RegisterLibFunc(&nvmlDeviceGetHandleByIndex_v2, lib, sym_nvmlDeviceGetHandleByIndex_v2)
 	purego.RegisterLibFunc(&nvmlDeviceGetPcieThroughput, lib, sym_nvmlDeviceGetPcieThroughput)
+	if _, err := purego.Dlsym(lib, sym_nvmlDeviceGetUtilizationRates); err == nil {
+		purego.RegisterLibFunc(&nvmlDeviceGetUtilizationRates, lib, sym_nvmlDeviceGetUtilizationRates)
+	}
 	purego.RegisterLibFunc(&nvmlDeviceGetNvLinkState, lib, sym_nvmlDeviceGetNvLinkState)
 	purego.RegisterLibFunc(&nvmlDeviceGetFieldValues, lib, sym_nvmlDeviceGetFieldValues)
 	purego.RegisterLibFunc(&nvmlDeviceGetUUID, lib, sym_nvmlDeviceGetUUID)

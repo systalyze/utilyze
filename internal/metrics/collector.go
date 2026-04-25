@@ -51,24 +51,41 @@ func NewCollector(deviceIds []int, metricsInterval time.Duration) (*Collector, e
 	})
 }
 
-type DeviceSnapshot struct {
-	DeviceID      int
-	ComputeSOLPct float64
-	MemorySOLPct  float64
+type SOLSnapshot struct {
+	ComputePct float64
+	MemoryPct  float64
+	Valid      bool
 }
 
 type BandwidthSnapshot struct {
-	DeviceID               int
-	PCIeTxBytesPerSecond   float64
-	PCIeRxBytesPerSecond   float64
-	NVLinkTxBytesPerSecond float64
-	NVLinkRxBytesPerSecond float64
+	PCIeTxBps   float64
+	PCIeRxBps   float64
+	NVLinkTxBps float64
+	NVLinkRxBps float64
+	Valid       bool
+}
+
+type DCGMUtilizationSnapshot struct {
+	SMActivePct float64
+	Valid       bool
+}
+
+type NVMLUtilizationSnapshot struct {
+	UtilPct float64
+	Valid   bool
+}
+
+type GPUSnapshot struct {
+	DeviceID        int
+	SOL             SOLSnapshot
+	Bandwidth       BandwidthSnapshot
+	DCGMUtilization DCGMUtilizationSnapshot
+	NVMLUtilization NVMLUtilizationSnapshot
 }
 
 type MetricsSnapshot struct {
-	Timestamp          time.Time
-	DeviceSnapshots    []DeviceSnapshot
-	BandwidthSnapshots []BandwidthSnapshot
+	Timestamp time.Time
+	GPUs      []GPUSnapshot
 }
 
 func (c *Collector) Start(ctx context.Context, metrics chan MetricsSnapshot) {
@@ -82,36 +99,56 @@ func (c *Collector) Start(ctx context.Context, metrics chan MetricsSnapshot) {
 			return
 		case <-t.C:
 			pollTime := time.Now()
-			deviceSnapshots := make([]DeviceSnapshot, 0, len(c.deviceIds))
-			bandwidthSnapshots := make([]BandwidthSnapshot, 0, len(c.deviceIds))
+			gpus := make([]GPUSnapshot, 0, len(c.deviceIds))
 			for _, deviceID := range c.deviceIds {
+				gpu := GPUSnapshot{DeviceID: deviceID}
+				hasData := false
+
 				snapshot, err := c.sampler.Poll(deviceID)
 				if err == nil {
-					deviceSnapshots = append(deviceSnapshots, DeviceSnapshot{
-						DeviceID:      deviceID,
-						ComputeSOLPct: snapshot.ComputeSOLPct,
-						MemorySOLPct:  snapshot.MemorySOLPct,
-					})
+					if snapshot.ComputeSOLPct != nil && snapshot.MemorySOLPct != nil {
+						gpu.SOL.ComputePct = *snapshot.ComputeSOLPct
+						gpu.SOL.MemoryPct = *snapshot.MemorySOLPct
+						gpu.SOL.Valid = true
+						hasData = true
+					}
+					if snapshot.SMActivePct != nil {
+						gpu.DCGMUtilization.SMActivePct = *snapshot.SMActivePct
+						gpu.DCGMUtilization.Valid = true
+						hasData = true
+					}
+				}
+
+				utilizationSnapshot, err := c.nv.PollUtilization(deviceID, pollTime)
+				if err == nil && utilizationSnapshot.GPUUtilPct != nil {
+					gpu.NVMLUtilization.UtilPct = *utilizationSnapshot.GPUUtilPct
+					gpu.NVMLUtilization.Valid = true
+					hasData = true
 				}
 
 				bandwidthSnapshot, err := c.nv.PollBandwidth(deviceID, pollTime)
-				if err != nil {
-					continue
+				if err == nil &&
+					bandwidthSnapshot.PCIeTxBps != nil &&
+					bandwidthSnapshot.PCIeRxBps != nil &&
+					bandwidthSnapshot.NVLinkTxBps != nil &&
+					bandwidthSnapshot.NVLinkRxBps != nil {
+					gpu.Bandwidth.PCIeTxBps = *bandwidthSnapshot.PCIeTxBps
+					gpu.Bandwidth.PCIeRxBps = *bandwidthSnapshot.PCIeRxBps
+					gpu.Bandwidth.NVLinkTxBps = *bandwidthSnapshot.NVLinkTxBps
+					gpu.Bandwidth.NVLinkRxBps = *bandwidthSnapshot.NVLinkRxBps
+					gpu.Bandwidth.Valid = true
+					hasData = true
 				}
-				bandwidthSnapshots = append(bandwidthSnapshots, BandwidthSnapshot{
-					DeviceID:               deviceID,
-					PCIeTxBytesPerSecond:   bandwidthSnapshot.PCIeTxBps,
-					PCIeRxBytesPerSecond:   bandwidthSnapshot.PCIeRxBps,
-					NVLinkTxBytesPerSecond: bandwidthSnapshot.NVLinkTxBps,
-					NVLinkRxBytesPerSecond: bandwidthSnapshot.NVLinkRxBps,
-				})
+
+				if hasData {
+					gpus = append(gpus, gpu)
+				}
 			}
 
-			if len(deviceSnapshots) > 0 || len(bandwidthSnapshots) > 0 {
+			if len(gpus) > 0 {
 				metrics <- MetricsSnapshot{
-					Timestamp:          pollTime,
-					DeviceSnapshots:    deviceSnapshots,
-					BandwidthSnapshots: bandwidthSnapshots,
+					Timestamp: pollTime,
+					GPUs:      gpus,
 				}
 			}
 		}

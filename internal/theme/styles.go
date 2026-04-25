@@ -14,6 +14,7 @@ type Styles struct {
 	ChartBorder     lipgloss.Style
 	Compute         lipgloss.Style
 	Memory          lipgloss.Style
+	SMActivity      lipgloss.Style
 	NVLink          lipgloss.Style
 	PCIe            lipgloss.Style
 	ComputeCeiling  lipgloss.Style
@@ -23,11 +24,6 @@ type Styles struct {
 
 func NewStyles(dark bool) Styles {
 	palette := NewPalette(dark)
-
-	borderFg := lipgloss.Color("15")
-	axisFg := lipgloss.Color("15")
-	computeFg := lipgloss.Color("#00D7FF")
-	memoryFg := lipgloss.Color("#FF5F00")
 
 	header := lipgloss.NewStyle().
 		Background(palette.Surface).
@@ -44,13 +40,14 @@ func NewStyles(dark bool) Styles {
 		HeaderLabel:     lipgloss.NewStyle().Inherit(header),
 		HeaderSecondary: lipgloss.NewStyle().Inherit(header).Foreground(palette.TextMuted),
 		ChartPanel:      panel,
-		ChartAxis:       lipgloss.NewStyle().Inherit(panel).Foreground(axisFg),
+		ChartAxis:       lipgloss.NewStyle().Inherit(panel).Foreground(palette.Text),
 		ChartBorder: lipgloss.NewStyle().Inherit(panel).
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(borderFg).
+			BorderForeground(palette.Text).
 			BorderBackground(palette.Panel),
-		Compute:        lipgloss.NewStyle().Foreground(computeFg),
-		Memory:         lipgloss.NewStyle().Foreground(memoryFg),
+		Compute:        lipgloss.NewStyle().Foreground(palette.Compute),
+		Memory:         lipgloss.NewStyle().Foreground(palette.Memory),
+		SMActivity:     lipgloss.NewStyle().Foreground(palette.SMActivity),
 		NVLink:         lipgloss.NewStyle().Foreground(palette.NVLink),
 		PCIe:           lipgloss.NewStyle().Foreground(palette.PCIe),
 		ComputeCeiling: lipgloss.NewStyle().Foreground(palette.ComputeCeiling),

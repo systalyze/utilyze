@@ -12,6 +12,22 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
+type percentValue struct {
+	Value float64
+	Valid bool
+}
+
+func (v percentValue) String() string {
+	if !v.Valid {
+		return "--.-%"
+	}
+	return fmt.Sprintf("%4.1f%%", v.Value)
+}
+
+func newPercentValue(value float64) percentValue {
+	return percentValue{Value: value, Valid: true}
+}
+
 type model struct {
 	solChartTimeRange       time.Duration
 	bandwidthChartTimeRange time.Duration
@@ -29,12 +45,14 @@ type model struct {
 
 	enabledSeries []string
 
-	deviceIDs         []int
-	deviceIndexMap    map[int]int // physical device ID → chart index
-	solCharts         []*tschart.Model
-	online            []bool
-	memoryLastValues  []float64
-	computeLastValues []float64
+	deviceIDs            []int
+	deviceIndexMap       map[int]int // physical device ID → chart index
+	solCharts            []*tschart.Model
+	online               []bool
+	memoryLastValues     []percentValue
+	computeLastValues    []percentValue
+	grActiveLastValues   []percentValue
+	smActivityLastValues []percentValue
 
 	bandwidthChart  *tschart.Model
 	nvlinkLastValue float64
@@ -47,9 +65,10 @@ type model struct {
 
 	gpuCeilings map[int]GpuCeiling
 
-	dark       bool
-	detailMode bool
-	styles     theme.Styles
+	dark        bool
+	metricsMode metricsMode
+	detailMode  bool
+	styles      theme.Styles
 }
 
 func (m model) Init() tea.Cmd {
@@ -91,10 +110,7 @@ func (m *model) initCharts(deviceIDs []int) {
 			tschart.WithDetailMode(m.detailMode),
 		}
 		m.solCharts[i] = tschart.New(m.width, m.height, opts...)
-		m.solCharts[i].SetSeriesStyle(computeSeries, m.styles.Compute.Inherit(m.styles.ChartPanel))
-		m.solCharts[i].SetSeriesStyle(memorySeries, m.styles.Memory.Inherit(m.styles.ChartPanel))
-		m.solCharts[i].Push(computeSeries, now, 0) // start all charts at the same time
-		m.solCharts[i].Push(memorySeries, now, 0)
+		m.applyUtilizationSeriesStyles(m.solCharts[i])
 	}
 
 	bwOpts := []tschart.Option{
@@ -117,8 +133,10 @@ func (m *model) initCharts(deviceIDs []int) {
 	m.bandwidthChart.Push(nvlinkSeries, now, 0)
 	m.bandwidthChart.Push(pcieSeries, now, 0)
 
-	m.computeLastValues = make([]float64, numDevices)
-	m.memoryLastValues = make([]float64, numDevices)
+	m.computeLastValues = make([]percentValue, numDevices)
+	m.memoryLastValues = make([]percentValue, numDevices)
+	m.grActiveLastValues = make([]percentValue, numDevices)
+	m.smActivityLastValues = make([]percentValue, numDevices)
 	m.online = make([]bool, numDevices)
 }
 
@@ -127,8 +145,9 @@ func (m model) draw() {
 	if m.paused && !m.pausedAt.IsZero() {
 		now = m.pausedAt
 	}
+	mode := m.metricsMode.def()
 	for _, chart := range m.solCharts {
-		chart.Draw(m.enabledSeries, now)
+		chart.Draw(mode.seriesNames(m), now)
 		chart.Invalidate()
 	}
 	m.bandwidthChart.Draw(m.enabledSeries, now)
@@ -141,11 +160,13 @@ func (m *model) applyCeilingThresholds() {
 			continue
 		}
 		var thresholds []tschart.ThresholdLine
-		if g, ok := m.gpuCeilings[m.deviceIDs[i]]; ok && g.ComputeSolCeiling != nil {
-			thresholds = append(thresholds, tschart.ThresholdLine{
-				Value: *g.ComputeSolCeiling,
-				Style: m.styles.ComputeCeiling.Inherit(m.styles.ChartPanel),
-			})
+		if m.metricsMode == MetricsModeSOL {
+			if g, ok := m.gpuCeilings[m.deviceIDs[i]]; ok && g.ComputeSolCeiling != nil {
+				thresholds = append(thresholds, tschart.ThresholdLine{
+					Value: *g.ComputeSolCeiling,
+					Style: m.styles.ComputeCeiling.Inherit(m.styles.ChartPanel),
+				})
+			}
 		}
 		chart.SetThresholds(thresholds)
 	}
@@ -159,6 +180,15 @@ func (m *model) resetCharts() {
 	m.applyTheme()
 }
 
+func (m model) applyUtilizationSeriesStyles(chart *tschart.Model) {
+	if chart == nil {
+		return
+	}
+	for _, series := range allMetricsSeries() {
+		chart.SetSeriesStyle(series.name, series.styleFor(m.styles).Inherit(m.styles.ChartPanel))
+	}
+}
+
 func (m *model) applyTheme() {
 	m.styles = theme.NewStyles(m.dark)
 	m.spinner = spinner.New(&m.styles.Spinner)
@@ -167,15 +197,13 @@ func (m *model) applyTheme() {
 		if chart == nil {
 			continue
 		}
-		chart.PlainLines = m.highContrast
+		chart.SetDetailMode(m.detailMode)
 		chart.SetStyles(m.styles.ChartBorder, m.styles.ChartAxis, m.styles.ChartPanel)
-		chart.SetSeriesStyle(computeSeries, m.styles.Compute.Inherit(m.styles.ChartPanel))
-		chart.SetSeriesStyle(memorySeries, m.styles.Memory.Inherit(m.styles.ChartPanel))
-		chart.Invalidate()
+		m.applyUtilizationSeriesStyles(chart)
 	}
 
 	if m.bandwidthChart != nil {
-		m.bandwidthChart.PlainLines = m.highContrast
+		m.bandwidthChart.SetDetailMode(m.detailMode)
 		m.bandwidthChart.SetStyles(m.styles.ChartBorder, m.styles.ChartAxis, m.styles.ChartPanel)
 		m.bandwidthChart.SetSeriesStyle(nvlinkSeries, m.styles.NVLink.Inherit(m.styles.ChartPanel))
 		m.bandwidthChart.SetSeriesStyle(pcieSeries, m.styles.PCIe.Inherit(m.styles.ChartPanel))
@@ -206,7 +234,7 @@ func New(w int, h int, opts ...Option) model {
 		showBandwidth: true,
 		dark:          true,
 
-		enabledSeries: []string{computeSeries, memorySeries, nvlinkSeries, pcieSeries},
+		enabledSeries: append(allMetricsSeriesNames(), nvlinkSeries, pcieSeries),
 	}
 	for _, opt := range opts {
 		opt(&m)

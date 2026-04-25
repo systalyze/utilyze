@@ -21,10 +21,16 @@ const (
 type BandwidthSnapshot struct {
 	DeviceID    int
 	Timestamp   time.Time
-	PCIeTxBps   float64
-	PCIeRxBps   float64
-	NVLinkTxBps float64
-	NVLinkRxBps float64
+	PCIeTxBps   *float64
+	PCIeRxBps   *float64
+	NVLinkTxBps *float64
+	NVLinkRxBps *float64
+}
+
+type UtilizationSnapshot struct {
+	DeviceID   int
+	Timestamp  time.Time
+	GPUUtilPct *float64
 }
 
 type deviceState struct {
@@ -136,8 +142,10 @@ func (d *deviceState) pollBandwidth(now time.Time) (BandwidthSnapshot, error) {
 	}
 
 	if pcieSuccess {
-		snapshot.PCIeTxBps = float64(pcieTxKBps) * 1000
-		snapshot.PCIeRxBps = float64(pcieRxKBps) * 1000
+		txBps := float64(pcieTxKBps) * 1000
+		rxBps := float64(pcieRxKBps) * 1000
+		snapshot.PCIeTxBps = &txBps
+		snapshot.PCIeRxBps = &rxBps
 	}
 
 	if len(d.activeNVLinkIDs) == 0 {
@@ -181,8 +189,10 @@ func (d *deviceState) pollBandwidth(now time.Time) (BandwidthSnapshot, error) {
 			if totalRXKiB >= d.prevNVLinkRxKiB {
 				deltaRXKiB = totalRXKiB - d.prevNVLinkRxKiB
 			}
-			snapshot.NVLinkTxBps = float64(deltaTXKiB) * 1024 / dtSec
-			snapshot.NVLinkRxBps = float64(deltaRXKiB) * 1024 / dtSec
+			txBps := float64(deltaTXKiB) * 1024 / dtSec
+			rxBps := float64(deltaRXKiB) * 1024 / dtSec
+			snapshot.NVLinkTxBps = &txBps
+			snapshot.NVLinkRxBps = &rxBps
 		}
 	}
 
@@ -232,6 +242,27 @@ func (n *Client) PollBandwidth(deviceID int, now time.Time) (BandwidthSnapshot, 
 		return BandwidthSnapshot{}, err
 	}
 	return device.pollBandwidth(now)
+}
+
+func (n *Client) PollUtilization(deviceID int, now time.Time) (UtilizationSnapshot, error) {
+	if nvmlDeviceGetUtilizationRates == nil {
+		return UtilizationSnapshot{}, errors.New("nvmlDeviceGetUtilizationRates not available")
+	}
+	device, err := n.device(deviceID)
+	if err != nil {
+		return UtilizationSnapshot{}, err
+	}
+
+	var utilization nvmlUtilization
+	if ret := nvmlDeviceGetUtilizationRates(device.handle, &utilization); ret != NVML_SUCCESS {
+		return UtilizationSnapshot{}, fmt.Errorf("nvmlDeviceGetUtilizationRates(%d): %d", deviceID, ret)
+	}
+	gpuUtilPct := float64(utilization.GPU)
+	return UtilizationSnapshot{
+		DeviceID:   deviceID,
+		Timestamp:  now,
+		GPUUtilPct: &gpuUtilPct,
+	}, nil
 }
 
 type ProcessInfo struct {

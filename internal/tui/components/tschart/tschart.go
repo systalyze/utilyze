@@ -504,9 +504,9 @@ func (m *Model) SetDetailMode(enabled bool) {
 		return
 	}
 	m.DetailMode = enabled
-	m.buildGrids()
+	m.grids = nil
+	m.lineGrids = nil
 	m.buildThresholdGrids()
-	m.chartCache = m.renderChart(m.seriesRenderCache)
 	m.viewDirty = true
 }
 

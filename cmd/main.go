@@ -213,9 +213,8 @@ func run(ctx context.Context, deviceIds []int) error {
 			}
 
 			p.Send(top.MetricsSnapshotMsg{
-				Timestamp:          snapshot.Timestamp,
-				DeviceSnapshots:    snapshot.DeviceSnapshots,
-				BandwidthSnapshots: snapshot.BandwidthSnapshots,
+				Timestamp: snapshot.Timestamp,
+				GPUs:      snapshot.GPUs,
 			})
 		}
 

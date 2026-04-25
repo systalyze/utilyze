@@ -11,6 +11,7 @@ const (
 	sym_nvmlDeviceGetCount_v2                   = "nvmlDeviceGetCount_v2"
 	sym_nvmlDeviceGetHandleByIndex_v2           = "nvmlDeviceGetHandleByIndex_v2"
 	sym_nvmlDeviceGetPcieThroughput             = "nvmlDeviceGetPcieThroughput"
+	sym_nvmlDeviceGetUtilizationRates           = "nvmlDeviceGetUtilizationRates"
 	sym_nvmlDeviceGetNvLinkState                = "nvmlDeviceGetNvLinkState"
 	sym_nvmlDeviceGetFieldValues                = "nvmlDeviceGetFieldValues"
 	sym_nvmlDeviceGetUUID                       = "nvmlDeviceGetUUID"
@@ -45,6 +46,11 @@ const (
 	NVML_PCIE_UTIL_TX_BYTES nvmlPcieUtilCounterType = 0
 	NVML_PCIE_UTIL_RX_BYTES nvmlPcieUtilCounterType = 1
 )
+
+type nvmlUtilization struct {
+	GPU    uint32
+	Memory uint32
+}
 
 const (
 	NVML_FEATURE_DISABLED uint32 = 0
@@ -104,6 +110,7 @@ var (
 	nvmlDeviceGetCount_v2         func(outCount *uint32) nvmlReturn
 	nvmlDeviceGetHandleByIndex_v2 func(index uint32, device *nvmlDeviceHandle) nvmlReturn
 	nvmlDeviceGetPcieThroughput   func(device nvmlDeviceHandle, counter nvmlPcieUtilCounterType, value *uint32) nvmlReturn
+	nvmlDeviceGetUtilizationRates func(device nvmlDeviceHandle, utilization *nvmlUtilization) nvmlReturn
 	nvmlDeviceGetNvLinkState      func(device nvmlDeviceHandle, link uint32, isActive *uint32) nvmlReturn
 	nvmlDeviceGetFieldValues      func(device nvmlDeviceHandle, valuesCount int, values []nvmlFieldValue) nvmlReturn
 	nvmlDeviceGetUUID             func(device nvmlDeviceHandle, uuid *byte, length uint32) nvmlReturn

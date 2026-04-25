@@ -129,10 +129,10 @@ func (r *Reporter) tick(ctx context.Context) {
 	if len(discoveryGPUs) == 0 {
 		seen := make(map[int]bool)
 		for _, snap := range window {
-			for _, ds := range snap.DeviceSnapshots {
-				if !seen[ds.DeviceID] {
-					seen[ds.DeviceID] = true
-					discoveryGPUs = append(discoveryGPUs, ds.DeviceID)
+			for _, gpu := range snap.GPUs {
+				if !seen[gpu.DeviceID] {
+					seen[gpu.DeviceID] = true
+					discoveryGPUs = append(discoveryGPUs, gpu.DeviceID)
 				}
 			}
 		}
@@ -156,27 +156,24 @@ func (r *Reporter) tick(ctx context.Context) {
 	}
 	byID := make(map[int]*agg)
 	for _, snap := range window {
-		for _, ds := range snap.DeviceSnapshots {
-			a := byID[ds.DeviceID]
+		for _, gpu := range snap.GPUs {
+			a := byID[gpu.DeviceID]
 			if a == nil {
 				a = &agg{}
-				byID[ds.DeviceID] = a
+				byID[gpu.DeviceID] = a
 			}
-			a.computeSum += ds.ComputeSOLPct
-			a.memorySum += ds.MemorySOLPct
-			a.solCount++
-		}
-		for _, bs := range snap.BandwidthSnapshots {
-			a := byID[bs.DeviceID]
-			if a == nil {
-				a = &agg{}
-				byID[bs.DeviceID] = a
+			if gpu.SOL.Valid {
+				a.computeSum += gpu.SOL.ComputePct
+				a.memorySum += gpu.SOL.MemoryPct
+				a.solCount++
 			}
-			a.pcieTxSum += bs.PCIeTxBytesPerSecond
-			a.pcieRxSum += bs.PCIeRxBytesPerSecond
-			a.nvlinkTxSum += bs.NVLinkTxBytesPerSecond
-			a.nvlinkRxSum += bs.NVLinkRxBytesPerSecond
-			a.bwCount++
+			if gpu.Bandwidth.Valid {
+				a.pcieTxSum += gpu.Bandwidth.PCIeTxBps
+				a.pcieRxSum += gpu.Bandwidth.PCIeRxBps
+				a.nvlinkTxSum += gpu.Bandwidth.NVLinkTxBps
+				a.nvlinkRxSum += gpu.Bandwidth.NVLinkRxBps
+				a.bwCount++
+			}
 		}
 	}
 
