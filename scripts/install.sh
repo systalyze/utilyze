@@ -15,10 +15,11 @@ else
   exit 1
 fi
 
-[ "$(uname -s)" = "Linux" ] || {
-  echo "Error: only Linux is supported." >&2
-  exit 1
-}
+case "$(uname -s)" in
+  Linux)  OS=linux ;;
+  Darwin) OS=darwin ;;
+  *) echo "Error: unsupported operating system: $(uname -s)" >&2; exit 1 ;;
+esac
 
 case "$(uname -m)" in
   x86_64|amd64)  ARCH=amd64 ;;
@@ -31,7 +32,7 @@ command -v curl >/dev/null 2>&1 || {
   exit 1
 }
 
-asset_name="${BIN_NAME}-linux-${ARCH}"
+asset_name="${BIN_NAME}-${OS}-${ARCH}"
 tmpdir="$(mktemp -d)"
 trap 'rm -rf "$tmpdir"' 0
 
@@ -66,6 +67,8 @@ echo "Installed ${BIN_NAME} and ${ALT_BIN_NAME} to ${INSTALL_DIR} (${INSTALLED_V
 run_path="${INSTALL_DIR}/${BIN_NAME}"
 setcap=0
 install_system_wide=0
+needs_sudo_for_profiling=0
+[ "$OS" = "linux" ] && needs_sudo_for_profiling=1
 
 run_priv() {
   if [ "$USER_ID" -eq 0 ] && ! command -v sudo >/dev/null 2>&1; then
@@ -88,7 +91,7 @@ print_symlink_commands() {
   echo "  sudo ln -sf \"${INSTALL_DIR}/${ALT_BIN_NAME}\" ${SYSTEM_INSTALL_DIR}/${ALT_BIN_NAME}" >&2
 }
 
-if [ -r /dev/tty ] && [ -w /dev/tty ]; then
+if [ "$OS" = "linux" ] && [ -r /dev/tty ] && [ -w /dev/tty ]; then
   if [ -z "${UTLZ_INSTALL_WITHOUT_ROOT:-}" ]; then
     if [ "$USER_ID" -ne 0 ]; then
       echo >&2
@@ -135,6 +138,7 @@ if [ -r /dev/tty ] && [ -w /dev/tty ]; then
     if [ "$setcap" -eq 1 ]; then
       if run_priv setcap cap_sys_admin+ep "${INSTALL_DIR}/${BIN_NAME}"; then
         echo "Set CAP_SYS_ADMIN capability for ${BIN_NAME}."
+        needs_sudo_for_profiling=0
       else
         setcap=0
         echo "Error: setcap failed. You will need to run with sudo when profiling or retry setcap as root." >&2
@@ -148,17 +152,17 @@ fi
 install_dir_on_path=0
 case ":${PATH:-}:" in *:"${INSTALL_DIR}":*) install_dir_on_path=1 ;; esac
 
-if [ "$setcap" -eq 1 ]; then
-  if [ "$run_path" = "${BIN_NAME}" ] || [ "$install_dir_on_path" -eq 1 ]; then
-    run_hint="${BIN_NAME}"
-  else
-    run_hint="${INSTALL_DIR}/${BIN_NAME}"
-  fi
-else
+if [ "$needs_sudo_for_profiling" -eq 1 ]; then
   if [ "$run_path" = "${BIN_NAME}" ] || [ "$install_dir_on_path" -eq 1 ]; then
     run_hint="sudo ${BIN_NAME}"
   else
     run_hint="sudo ${INSTALL_DIR}/${BIN_NAME}"
+  fi
+else
+  if [ "$run_path" = "${BIN_NAME}" ] || [ "$install_dir_on_path" -eq 1 ]; then
+    run_hint="${BIN_NAME}"
+  else
+    run_hint="${INSTALL_DIR}/${BIN_NAME}"
   fi
 fi
 
