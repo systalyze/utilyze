@@ -91,6 +91,73 @@ print_symlink_commands() {
   echo "  sudo ln -sf \"${INSTALL_DIR}/${ALT_BIN_NAME}\" ${SYSTEM_INSTALL_DIR}/${ALT_BIN_NAME}" >&2
 }
 
+path_contains_dir() {
+  dir="${1%/}"
+  old_ifs="$IFS"
+  IFS=:
+  for entry in ${PATH:-}; do
+    IFS="$old_ifs"
+    entry="${entry%/}"
+    if [ "$entry" = "$dir" ]; then
+      return 0
+    fi
+    IFS=:
+  done
+  IFS="$old_ifs"
+  return 1
+}
+
+shell_quote() {
+  printf "%s" "$1" | sed "s/'/'\\\\''/g; s/^/'/; s/$/'/"
+}
+
+shell_profile() {
+  if [ -n "${UTLZ_PATH_FILE:-}" ]; then
+    printf "%s\n" "$UTLZ_PATH_FILE"
+    return
+  fi
+  if [ -z "${HOME:-}" ]; then
+    return 1
+  fi
+
+  case "${SHELL##*/}" in
+    zsh)  printf "%s\n" "${HOME}/.zshrc" ;;
+    bash)
+      if [ "$OS" = "darwin" ]; then
+        printf "%s\n" "${HOME}/.bash_profile"
+      else
+        printf "%s\n" "${HOME}/.bashrc"
+      fi
+      ;;
+    *)    printf "%s\n" "${HOME}/.profile" ;;
+  esac
+}
+
+add_install_dir_to_path() {
+  profile="$(shell_profile)" || return 1
+  quoted_install_dir="$(shell_quote "$INSTALL_DIR")"
+
+  if [ -f "$profile" ] && grep -F "$INSTALL_DIR" "$profile" >/dev/null 2>&1; then
+    PATH="${INSTALL_DIR}:${PATH:-}"
+    export PATH
+    echo "${INSTALL_DIR} is already configured in ${profile}."
+    return 0
+  fi
+
+  {
+    echo
+    echo "# Added by utlz installer"
+    echo "export PATH=${quoted_install_dir}:\$PATH"
+  } >>"$profile" || return 1
+
+  PATH="${INSTALL_DIR}:${PATH:-}"
+  export PATH
+  echo "Added ${INSTALL_DIR} to PATH in ${profile}. Restart your shell to pick up the change:"
+  echo
+  echo "  source ${profile}"
+  echo
+}
+
 if [ "$OS" = "linux" ] && [ -r /dev/tty ] && [ -w /dev/tty ]; then
   if [ -z "${UTLZ_INSTALL_WITHOUT_ROOT:-}" ]; then
     if [ "$USER_ID" -ne 0 ]; then
@@ -150,10 +217,32 @@ if [ "$OS" = "linux" ] && [ -r /dev/tty ] && [ -w /dev/tty ]; then
 fi
 
 install_dir_on_path=0
-case ":${PATH:-}:" in *:"${INSTALL_DIR}":*) install_dir_on_path=1 ;; esac
+if path_contains_dir "$INSTALL_DIR"; then
+  install_dir_on_path=1
+elif [ -z "${UTLZ_INSTALL_WITHOUT_PATH:-}" ]; then
+  if [ -r /dev/tty ] && [ -w /dev/tty ]; then
+    printf 'Would you like to add %s to your PATH? [Y/n] ' "$INSTALL_DIR" >&2
+    if read -r answer </dev/tty; then
+      case "$answer" in
+        n|N|[Nn][Oo]) ;;
+        *)
+          if add_install_dir_to_path; then
+            install_dir_on_path=1
+          else
+            echo "Warning: failed to add ${INSTALL_DIR} to PATH. Add it manually to run ${BIN_NAME} from any terminal." >&2
+          fi
+          ;;
+      esac
+    else
+      echo "Warning: could not read confirmation. Add ${INSTALL_DIR} to PATH to run ${BIN_NAME} from any terminal." >&2
+    fi
+  else
+    echo "Add ${INSTALL_DIR} to PATH to run ${BIN_NAME} from any terminal." >&2
+  fi
+fi
 
 if [ "$needs_sudo_for_profiling" -eq 1 ]; then
-  if [ "$run_path" = "${BIN_NAME}" ] || [ "$install_dir_on_path" -eq 1 ]; then
+  if [ "$run_path" = "${BIN_NAME}" ]; then
     run_hint="sudo ${BIN_NAME}"
   else
     run_hint="sudo ${INSTALL_DIR}/${BIN_NAME}"
