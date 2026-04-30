@@ -740,7 +740,27 @@ func buildExportRows(
 				row.ModelName = a.ModelID
 			}
 		}
+		// Skip rows that have no metric data at all (e.g. before the
+		// first sampler snapshot has arrived). Otherwise we'd emit a
+		// row of nothing but nulls every interval.
+		if !rowHasMetrics(row) {
+			continue
+		}
 		rows = append(rows, row)
 	}
 	return rows
+}
+
+// rowHasMetrics reports whether row carries at least one numeric metric.
+// Identifying metadata (timestamp, device_id, gpu_name, model_name) doesn't
+// count.
+func rowHasMetrics(row export.Row) bool {
+	return row.ComputeSOLPct != nil ||
+		row.MemorySOLPct != nil ||
+		row.AttainableComputeSOLPct != nil ||
+		row.SMActivePct != nil ||
+		row.PCIeTxGBps != nil ||
+		row.PCIeRxGBps != nil ||
+		row.NVLinkTxGBps != nil ||
+		row.NVLinkRxGBps != nil
 }
