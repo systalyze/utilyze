@@ -644,6 +644,16 @@ func runExport(ctx context.Context, deviceIds []int, exportCfg exportConfig) err
 	ticker := time.NewTicker(exportCfg.interval)
 	defer ticker.Stop()
 
+	// Track whether the sampler has ever produced SOL or SM-active values.
+	// If, after a few seconds of polling, we've still only seen NVML-derived
+	// fields (e.g. PCIe), warn once to stderr so the user isn't left to
+	// wonder why the profiler columns stay null. The most common cause is
+	// the on-device sampler/CUPTI not supporting the requested metrics on
+	// this hardware (the same data would be missing from the TUI too).
+	const samplerWarnAfter = 5 * time.Second
+	warnDeadline := time.Now().Add(samplerWarnAfter)
+	samplerWarned := false
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -656,8 +666,30 @@ func runExport(ctx context.Context, deviceIds []int, exportCfg exportConfig) err
 			if err := writer.WriteRows(rows); err != nil {
 				return fmt.Errorf("write export rows: %w", err)
 			}
+			if !samplerWarned && tick.After(warnDeadline) {
+				if !rowsHaveSamplerData(rows) {
+					fmt.Fprintln(os.Stderr,
+						"utlz: warning: on-device sampler has not produced any compute_sol_pct, memory_sol_pct or sm_active_pct values; "+
+							"the same data would be missing from the TUI on this GPU. Profiler metrics may be unavailable on this driver/hardware combination.")
+					samplerWarned = true
+				} else {
+					// Sampler data did show up — no need to keep checking.
+					samplerWarned = true
+				}
+			}
 		}
 	}
+}
+
+// rowsHaveSamplerData reports whether any row carries a value sourced from the
+// on-device sampler (SOL or SM-active), as opposed to NVML-only fields.
+func rowsHaveSamplerData(rows []export.Row) bool {
+	for _, r := range rows {
+		if r.ComputeSOLPct != nil || r.MemorySOLPct != nil || r.SMActivePct != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // buildExportRows snapshots the latest per-device collector state, ceilings and
