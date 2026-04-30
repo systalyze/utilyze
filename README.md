@@ -62,6 +62,38 @@ utlz --connect <SERVER_URL>
 
 Note that a single device ID can only be monitored by a single instance of `utlz`. This is due to the way NVIDIA's Perf SDK API handles device access.
 
+### Headless metrics export
+
+Instead of rendering the TUI, `utlz` can stream metrics in a structured format suitable for offline analysis, dashboards, or CI assertions, similar to `dcgmi dmon`:
+
+```bash
+# Export to a CSV file at 1 Hz
+sudo utlz --export csv --export-file metrics.csv --export-interval 1s
+
+# Export newline-delimited JSON to stdout at 2 Hz
+sudo utlz --export json --export-interval 500ms
+
+# CSV to stdout, scoped to specific GPUs
+sudo utlz --export csv --devices 0,2
+```
+
+One row is emitted per monitored GPU at each interval. Columns / JSON fields:
+
+| Field | Description |
+| --- | --- |
+| `timestamp` | ISO 8601 UTC timestamp with millisecond precision |
+| `device_id` | GPU index |
+| `gpu_name` | e.g. `H100-80G` |
+| `compute_sol_pct` | Compute SOL % |
+| `memory_sol_pct` | Memory SOL % |
+| `attainable_compute_sol_pct` | Attainable Compute SOL ceiling (when known) |
+| `sm_active_pct` | CUDA SM Active % |
+| `pcie_tx_gbps` / `pcie_rx_gbps` | PCIe TX/RX bandwidth in GB/s |
+| `nvlink_tx_gbps` / `nvlink_rx_gbps` | NVLink TX/RX bandwidth in GB/s |
+| `model_name` | Detected inference model (when discovered) |
+
+Missing values render as empty CSV cells / JSON `null`. When `--export-file` points to an existing file, output is appended; the CSV header is omitted on append so the file remains valid.
+
 ### Attainable SOL
 
 Utilyze discovers running inference servers to detect which model is loaded on each GPU. It computes an attainable compute SOL ceiling (your realistic peak given that model and hardware).
@@ -87,6 +119,9 @@ Flags (most have environment variable equivalents):
 
 - `--endpoints`: show discovered inference server endpoints per GPU
 - `--devices` / `UTLZ_DEVICES`: monitor specific GPUs (comma-separated list of device IDs)
+- `--export`: stream metrics in `csv` or `json` instead of running the TUI
+- `--export-file`: file to write exported metrics to (default: stdout)
+- `--export-interval`: interval between exported rows (default: `1s`, e.g. `500ms`)
 - `--log` / `UTLZ_LOG`: a file to write logs to (default: no logging)
 - `--log-level` / `UTLZ_LOG_LEVEL`: set the log level (default: `INFO`, other options: `DEBUG`, `WARN`, `ERROR`)
 - `--version`: show the version
