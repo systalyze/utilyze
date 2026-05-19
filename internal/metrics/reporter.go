@@ -52,7 +52,7 @@ type Reporter struct {
 }
 
 func New(config ReporterConfig) *Reporter {
-	if os.Getenv(disableEnvVar) == "1" {
+	if os.Getenv(disableEnvVar) != "0" {
 		return nil
 	}
 
