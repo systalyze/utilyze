@@ -149,6 +149,12 @@ func (d *deviceState) pollBandwidth(now time.Time) (BandwidthSnapshot, error) {
 	}
 
 	if len(d.activeNVLinkIDs) == 0 {
+		// No NVLink on this device (e.g. consumer/workstation cards).
+		// Report zero throughput rather than missing data so callers can
+		// still surface PCIe bandwidth.
+		zero := 0.0
+		snapshot.NVLinkTxBps = &zero
+		snapshot.NVLinkRxBps = &zero
 		return snapshot, nil
 	}
 
