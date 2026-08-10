@@ -1,0 +1,16 @@
+# Airgapped variant: metrics reporting disabled, image loaded from a tarball.
+# docker compose -f deploy/docker-compose.airgapped.yml up -d
+# See docs/offline-install.md for how to get the image onto the host.
+services:
+  utilyze:
+    image: ${UTILYZE_IMAGE:-utilyze:0.1.3}
+    pull_policy: never
+    container_name: utilyze
+    restart: unless-stopped
+    gpus: all
+    cap_add:
+      - SYS_ADMIN
+    pid: host
+    network_mode: host
+    environment:
+      UTLZ_DISABLE_METRICS: "1"

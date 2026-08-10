@@ -1,0 +1,39 @@
+{{- if .Values.openshift.createSCC }}
+# Bound to this chart's ServiceAccount only. Creating requires cluster-admin.
+apiVersion: security.openshift.io/v1
+kind: SecurityContextConstraints
+metadata:
+  name: {{ include "utilyze.fullname" . }}
+  labels:
+    {{- include "utilyze.labels" . | nindent 4 }}
+allowPrivilegedContainer: {{ .Values.profiling.privileged }}
+allowPrivilegeEscalation: {{ .Values.profiling.privileged }}
+{{- if and .Values.profiling.sysAdminCapability (not .Values.profiling.privileged) }}
+allowedCapabilities:
+  - SYS_ADMIN
+{{- end }}
+seccompProfiles:
+  - runtime/default
+allowHostPID: {{ .Values.hostPID }}
+allowHostNetwork: {{ .Values.hostNetwork }}
+allowHostPorts: {{ .Values.hostNetwork }}
+allowHostDirVolumePlugin: false
+allowHostIPC: false
+readOnlyRootFilesystem: false
+runAsUser:
+  type: RunAsAny
+seLinuxContext:
+  type: RunAsAny
+fsGroup:
+  type: RunAsAny
+supplementalGroups:
+  type: RunAsAny
+volumes:
+  - configMap
+  - downwardAPI
+  - emptyDir
+  - projected
+  - secret
+users:
+  - system:serviceaccount:{{ .Release.Namespace }}:{{ include "utilyze.serviceAccountName" . }}
+{{- end }}

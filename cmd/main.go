@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"log/slog"
+	"net"
 	"os"
 	"os/signal"
 	"sort"
@@ -40,8 +41,10 @@ const (
 	inferenceCacheTTL = 30 * time.Second
 	vllmProbeTimeout  = 2 * time.Second
 
-	serviceModeEnv = "UTLZ_SERVICE_MODE"
-	serviceAddrEnv = "UTLZ_SERVICE_ADDR"
+	serviceModeEnv        = "UTLZ_SERVICE_MODE"
+	serviceAddrEnv        = "UTLZ_SERVICE_ADDR"
+	serviceHostEnv        = "UTLZ_HOST"
+	disableUpdateCheckEnv = "UTLZ_DISABLE_UPDATE_CHECK"
 
 	serviceModeAuto   = "auto"
 	serviceModeServer = "server"
@@ -64,6 +67,7 @@ func main() {
 
 	var serviceAddr string
 	var serviceMode string
+	var serviceHost string
 	var servicePort string
 
 	flag.BoolVar(&showVersion, "version", false, "print version and exit")
@@ -73,6 +77,7 @@ func main() {
 	flag.StringVar(&serviceAddr, "connect", os.Getenv(serviceAddrEnv), "address to connect to for remote metrics over websocket")
 	flag.StringVar(&serviceAddr, "c", os.Getenv(serviceAddrEnv), "address to connect to for remote metrics over websocket")
 	flag.StringVar(&serviceMode, "mode", defaultServiceMode(), "service mode to run in (auto, server, client)")
+	flag.StringVar(&serviceHost, "host", os.Getenv(serviceHostEnv), "host address to bind to in server mode")
 	flag.StringVar(&servicePort, "port", "8079", "port to listen on for server mode")
 
 	flag.StringVar(&logFile, "log", os.Getenv("UTLZ_LOG"), "log file to write to")
@@ -105,7 +110,7 @@ func main() {
 		return
 	}
 
-	_ = version.CheckForUpdates(context.Background(), version.VERSION)
+	checkForUpdates(serviceMode)
 
 	deviceIds, err := parseDeviceIDs(devices)
 	if err != nil {
@@ -120,7 +125,7 @@ func main() {
 	runCfg := runConfig{
 		mode:        serviceMode,
 		connectAddr: serviceAddress(serviceAddr, servicePort),
-		listenAddr:  serviceAddress("", servicePort),
+		listenAddr:  listenAddress(serviceHost, servicePort),
 		config:      config.Load(),
 	}
 	if err := run(context.Background(), deviceIds, runCfg); err != nil {
@@ -217,11 +222,35 @@ func serviceAddress(addr string, port string) string {
 	if strings.TrimSpace(addr) != "" {
 		return addr
 	}
+	return listenAddress("", port)
+}
+
+func listenAddress(host string, port string) string {
+	host = strings.TrimSpace(host)
+	if host == "" {
+		host = service.DefaultHost
+	}
 	port = strings.TrimSpace(port)
 	if port == "" {
 		port = service.DefaultPort
 	}
-	return service.DefaultHost + ":" + port
+	return net.JoinHostPort(host, port)
+}
+
+// Best-effort, interactive TTY sessions only.
+func checkForUpdates(mode string) {
+	if os.Getenv(disableUpdateCheckEnv) == "1" {
+		return
+	}
+	if strings.EqualFold(strings.TrimSpace(mode), serviceModeServer) {
+		return
+	}
+	if !term.IsTerminal(int(os.Stderr.Fd())) {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	_ = version.CheckForUpdates(ctx, version.VERSION)
 }
 
 func ensureCanCollectMetrics() (bool, error) {

@@ -2,6 +2,70 @@
 
 These instructions are for machines without internet access. The installer requires internet at install time, and `utlz` will also try to download CUPTI from PyPI on first run if it can't find it locally — both need to be handled manually.
 
+## Kubernetes installation (Helm)
+
+This is the easiest path for an airgapped cluster. Two things cross the
+airgap: the image tarball and the chart (both come from the repo).
+
+On an internet-connected machine:
+
+```bash
+git clone https://github.com/systalyze/utilyze.git && cd utilyze
+docker build -f docker/Dockerfile -t utilyze:dev .
+docker save utilyze:dev | gzip > utilyze-image.tar.gz
+```
+
+Copy `utilyze-image.tar.gz` and the `charts/utilyze` directory to the
+airgapped environment. Load the image into your internal registry:
+
+```bash
+docker load -i utilyze-image.tar.gz
+docker tag utilyze:dev registry.internal/utilyze:dev
+docker push registry.internal/utilyze:dev
+```
+
+Install the chart with metrics reporting disabled, so the collectors make no
+outbound connections:
+
+```bash
+helm install utilyze ./charts/utilyze \
+  --set global.imageRegistry=registry.internal \
+  --set metrics.enabled=false
+```
+
+The chart README covers the overrides for your cluster type, such as
+`nodeSelector` on clusters without the GPU Operator.
+
+## Docker installation (single host)
+
+If the airgapped machine runs Docker or Podman, use the container image. It
+contains the binary and the CUPTI/PerfWorks libraries, so you only need one
+tarball.
+
+On an internet-connected machine, build the image and save it:
+
+```bash
+git clone https://github.com/systalyze/utilyze.git && cd utilyze
+docker build -f docker/Dockerfile -t utilyze:<version> .
+docker save utilyze:<version> | gzip > utilyze-image.tar.gz
+```
+
+Copy the tarball to the airgapped machine and load it:
+
+```bash
+docker load -i utilyze-image.tar.gz
+```
+
+Then follow [docker.md](docker.md) to run the image, or use the airgapped
+Compose file with your tag:
+
+```bash
+UTILYZE_IMAGE=utilyze:<version> docker compose -f deploy/docker-compose.airgapped.yml up -d
+``` Set
+`UTLZ_DISABLE_METRICS=1` to disable metrics reporting.
+
+## Bare-metal installation
+
 **You may not need the CUPTI files.** If the airgapped machine already has the CUDA toolkit or the `nvidia-cuda-cupti-cu12` pip package, `utlz` will find CUPTI on its own — skip step 1b and the `cupti-<version>` steps below and just copy the binary.
 
 <details>

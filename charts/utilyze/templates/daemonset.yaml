@@ -1,0 +1,115 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "utilyze.fullname" . }}
+  labels:
+    {{- include "utilyze.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "utilyze.selectorLabels" . | nindent 6 }}
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      # never surge: the GPU sampler is exclusive per GPU
+      maxSurge: 0
+      maxUnavailable: 1
+  template:
+    metadata:
+      labels:
+        {{- include "utilyze.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "utilyze.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if .Values.runtimeClassName }}
+      runtimeClassName: {{ .Values.runtimeClassName }}
+      {{- end }}
+      {{- if .Values.priorityClassName }}
+      priorityClassName: {{ .Values.priorityClassName }}
+      {{- end }}
+      hostPID: {{ .Values.hostPID }}
+      hostNetwork: {{ .Values.hostNetwork }}
+      {{- if .Values.hostNetwork }}
+      dnsPolicy: ClusterFirstWithHostNet
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: utilyze
+          image: {{ include "utilyze.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- if .Values.profiling.privileged }}
+            privileged: true
+            {{- else }}
+            runAsUser: 0
+            allowPrivilegeEscalation: false
+            seccompProfile:
+              type: RuntimeDefault
+            capabilities:
+              {{- if .Values.profiling.sysAdminCapability }}
+              add: ["SYS_ADMIN"] # GPU performance counters (SOL metrics)
+              {{- end }}
+              drop: ["ALL"]
+            {{- end }}
+          env:
+            {{- if .Values.nvidiaVisibleDevices }}
+            - name: NVIDIA_VISIBLE_DEVICES
+              value: {{ .Values.nvidiaVisibleDevices | quote }}
+            {{- end }}
+            - name: UTLZ_CLIENT_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            {{- if not .Values.metrics.enabled }}
+            - name: UTLZ_DISABLE_METRICS
+              value: "1"
+            {{- else if .Values.metrics.backendURL }}
+            - name: UTLZ_BACKEND_URL
+              value: {{ .Values.metrics.backendURL | quote }}
+            {{- end }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: 8079
+              protocol: TCP
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+            failureThreshold: 12
+          # no readinessProbe: /healthz is unconditional once listening, so it
+          # could never differ from liveness
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 15
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}

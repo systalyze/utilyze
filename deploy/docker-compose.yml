@@ -1,0 +1,12 @@
+# docker compose -f deploy/docker-compose.yml up -d
+# Settings are explained in docs/docker.md.
+services:
+  utilyze:
+    image: ${UTILYZE_IMAGE:-utilyze:dev}
+    container_name: utilyze
+    restart: unless-stopped
+    gpus: all
+    cap_add:
+      - SYS_ADMIN
+    pid: host
+    network_mode: host

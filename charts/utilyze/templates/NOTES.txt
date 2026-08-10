@@ -1,0 +1,16 @@
+Utilyze is rolling out as a DaemonSet. It runs on nodes labeled nvidia.com/gpu.present.
+
+Check collector health:
+
+  kubectl logs -l app.kubernetes.io/name={{ include "utilyze.name" . }} --tail=20
+
+View live metrics from one node on your workstation:
+
+  kubectl port-forward pod/<pod-on-that-node> 8079:8079
+  utlz --connect ws://127.0.0.1:8079/live
+
+{{- if not .Values.metrics.enabled }}
+
+Metrics reporting is disabled. The collectors make no outbound connections.
+Hosted attainable-SOL ceilings are unavailable.
+{{- end }}

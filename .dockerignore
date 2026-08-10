@@ -1,0 +1,12 @@
+.git
+.github
+build/
+charts/
+deploy/
+dist/
+docs/
+out/
+utlz
+utlz-patched
+*.md
+*.tar.gz

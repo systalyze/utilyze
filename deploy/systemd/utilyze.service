@@ -1,0 +1,28 @@
+# Utilyze as a systemd-managed Docker container.
+#
+# Install:
+#   sudo cp deploy/systemd/utilyze.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now utilyze
+#
+# View logs: journalctl -u utilyze
+[Unit]
+Description=Utilyze GPU profiler
+After=docker.service nvidia-persistenced.service
+Requires=docker.service
+
+[Service]
+# Remove a container left by an unclean stop.
+ExecStartPre=-/usr/bin/docker rm -f utilyze
+ExecStart=/usr/bin/docker run --rm --name utilyze \
+    --gpus all \
+    --cap-add SYS_ADMIN \
+    --pid host \
+    --network host \
+    utilyze:dev
+ExecStop=/usr/bin/docker stop utilyze
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,88 @@
+# Global overrides shared with parent charts / airgapped mirrors.
+global:
+  # Prepended to image.repository when set, e.g. "registry.internal:5000".
+  imageRegistry: ""
+
+image:
+  # No image is published yet: build it (docker build -f docker/Dockerfile
+  # -t utilyze:dev .), get it onto your nodes, and set the reference here.
+  repository: utilyze
+  tag: "dev"
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+# GPU performance counters need privileged access. `sysAdminCapability` adds
+# only CAP_SYS_ADMIN (recommended); `privileged` is the wide-open fallback for
+# debugging. With NVreg_RestrictProfilingToAdminUsers=0 set on the hosts, both
+# can be false.
+profiling:
+  sysAdminCapability: true
+  privileged: false
+
+# Host process visibility for per-workload attribution.
+hostPID: true
+
+# Host networking lets the scanner probe host-local inference endpoints and
+# exposes :8079 directly on each node. Off by default; the Service still
+# reaches pods via the pod network.
+hostNetwork: false
+
+metrics:
+  # When false, sets UTLZ_DISABLE_METRICS=1 — zero network egress, no hosted
+  # attainable-SOL ceilings.
+  enabled: true
+  # On-prem or airgapped backend override (UTLZ_BACKEND_URL).
+  backendURL: ""
+
+service:
+  enabled: true
+  type: ClusterIP
+  port: 8079
+
+# Only schedule where the GPU Operator / NFD labeled NVIDIA GPUs.
+nodeSelector:
+  nvidia.com/gpu.present: "true"
+
+tolerations:
+  - key: nvidia.com/gpu
+    operator: Exists
+    effect: NoSchedule
+
+# RuntimeClass installed by the NVIDIA GPU Operator / Container Toolkit.
+# Set to "" if the nvidia runtime is the cluster's default.
+runtimeClassName: nvidia
+
+# Injected as NVIDIA_VISIBLE_DEVICES for legacy-hook GPU access (this chart
+# requests no nvidia.com/gpu resources). Set to "" on CDI-mode toolkit
+# clusters to avoid conflicting double injection.
+nvidiaVisibleDevices: "all"
+
+# Monitoring should survive node pressure (same default as dcgm-exporter).
+priorityClassName: system-node-critical
+
+podSecurityContext: {}
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    memory: 512Mi
+
+extraEnv: []
+
+serviceAccount:
+  create: true
+  name: ""
+
+openshift:
+  # Create a SecurityContextConstraints granting exactly what the DaemonSet
+  # needs, bound to the chart's ServiceAccount. Requires cluster-admin.
+  createSCC: false
+
+podAnnotations: {}
+podLabels: {}

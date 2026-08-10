@@ -1,0 +1,31 @@
+# Utilyze as a Podman Quadlet (RHEL 9+ / any systemd with Podman 4.8+).
+#
+# Install:
+#   sudo cp deploy/quadlet/utilyze.container /etc/containers/systemd/
+#   sudo systemctl daemon-reload
+#   sudo systemctl start utilyze
+#
+# Prerequisite: NVIDIA Container Toolkit with a generated CDI spec:
+# nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml
+# Run Podman as root: rootless Podman cannot grant the CAP_SYS_ADMIN that GPU
+# performance counters require. If the host sets
+# NVreg_RestrictProfilingToAdminUsers=0, AddCapability can be removed.
+[Unit]
+Description=Utilyze GPU profiler
+
+[Container]
+Image=utilyze:dev
+ContainerName=utilyze
+AddDevice=nvidia.com/gpu=all
+AddCapability=SYS_ADMIN
+Network=host
+# without this, SELinux blocks the container from using the GPU driver libraries
+SecurityLabelDisable=true
+PodmanArgs=--pid=host
+
+[Service]
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
